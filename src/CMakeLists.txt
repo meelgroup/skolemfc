@@ -21,6 +21,7 @@
 include_directories(${PROJECT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+# Explicit includes for deps that don't propagate via target properties
 include_directories(${CRYPTOMINISAT5_INCLUDE_DIRS})
 include_directories(${ARJUN_INCLUDE_DIRS})
 include_directories(${LOUVAIN_COMMUNITIES_INCLUDE_DIRS})

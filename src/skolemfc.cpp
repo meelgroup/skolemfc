@@ -650,8 +650,9 @@ void SkolemFC::SklFC::get_samples(uint64_t samples_needed, int _seed)
 
   if (use_unisamp)
   {
-    unigen->set_unisamp(1);
-    unigen->set_unisamp_epsilon(epsilon_s);
+    // TODO fix unisamp and update
+    // unigen->set_unisamp(1);
+    // unigen->set_unisamp_epsilon(epsilon_s);
     ug_appmc->set_epsilon(0.414);
     ug_appmc->set_delta(0.1);
   }
@@ -704,7 +705,7 @@ void SkolemFC::SklFC::get_samples(uint64_t samples_needed, int _seed)
                               void*) { this->unigen_callback(solution, NULL); },
                        NULL);
 
-  ug_appmc->set_projection_set(sampling_vars);
+  ug_appmc->set_sampl_vars(sampling_vars);
 
   ApproxMC::SolCount c = ug_appmc->count();
   unigen->set_verb_sampler_cls(0);
@@ -879,18 +880,18 @@ ApproxMC::SolCount SkolemFC::SklFC::count_using_approxmc(
   for (const auto& cl : ret.cnf) appmc->add_clause(cl);
   sampling_vars = ret.sampling_vars;
   uint32_t offset_count_by_2_pow = ret.empty_occs;
-  appmc->set_projection_set(sampling_vars);
+  appmc->set_sampl_vars(sampling_vars);
   appmc->set_epsilon(_epsilon);
   appmc->set_delta(_delta);
-
-  if (_epsilon > 1) appmc->set_pivot_by_sqrt2(1);
+  // TODO update approxmc
+  // if (_epsilon > 1) appmc->set_pivot_by_sqrt2(1);
 
   appmc->set_verbosity(oracle_verb);
 
   ApproxMC::SolCount c;
   if (!sampling_vars.empty())
   {
-    appmc->set_projection_set(sampling_vars);
+    appmc->set_sampl_vars(sampling_vars);
     c = appmc->count();
   }
   else

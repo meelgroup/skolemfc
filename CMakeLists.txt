@@ -19,7 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-cmake_minimum_required (VERSION 3.10 FATAL_ERROR)
+cmake_minimum_required (VERSION 3.24 FATAL_ERROR)
 
 enable_language( CXX )
 
@@ -325,7 +325,7 @@ endif()
 # -----------------------------------------------------------------------------
 set (boost_components "")
 set(boost_components ${boost_components} program_options serialization)
-find_package( Boost 1.46 COMPONENTS ${boost_components})
+find_package(Boost 1.46 COMPONENTS ${boost_components} REQUIRED)
 
 option(NOZLIB "Don't use zlib" OFF)
 if (NOT NOZLIB AND NOT (STATICCOMPILE AND WIN32))
@@ -342,54 +342,190 @@ endif()
 
 find_library(GMP_LIB gmp REQUIRED)
 find_library(GMPXX_LIB gmpxx REQUIRED)
-find_package(cryptominisat5 CONFIG REQUIRED)
-find_package(arjun CONFIG REQUIRED)
-find_package(louvain_communities CONFIG REQUIRED)
-if (cryptominisat5_FOUND)
-    message(STATUS "Found CryptoMiniSat 5.x")
-    message(STATUS "CryptoMiniSat5 dynamic lib: ${CRYPTOMINISAT5_LIBRARIES}")
-    message(STATUS "CryptoMiniSat5 static lib:  ${CRYPTOMINISAT5_STATIC_LIBRARIES}")
-    message(STATUS "CryptoMiniSat5 static lib deps: ${CRYPTOMINISAT5_STATIC_LIBRARIES_DEPS}")
-    message(STATUS "CryptoMiniSat5 include dirs: ${CRYPTOMINISAT5_INCLUDE_DIRS}")
-else()
-    message(FATAL_ERROR "Cannot find CryptoMiniSat5. Please install it! Exiting.")
-endif()
 
 option(NOUNIGEN "Don't try to use UniSamp" OFF)
 
+# -----------------------------------------------------------------------------
+# Meelgroup dependency chain: louvain -> cryptominisat5 -> arjun -> approxmc -> unigen
+#
+# AUTO_DOWNLOAD=ON  : clone each dep from GitHub into build/deps/<name> at
+#                     cmake configure time, build and install to build/deps_install/
+# AUTO_DOWNLOAD=OFF : use local deps/<name> submodules if present, same build/install
+#                     falls back to system find_package if submodules are absent
+#
+# Use ./configure.sh -D to pass AUTO_DOWNLOAD=ON automatically.
+# Each dep is built in its own isolated cmake process to avoid target-name
+# collisions between the projects.  A stamp file prevents redundant rebuilds.
+# -----------------------------------------------------------------------------
+option(AUTO_DOWNLOAD "Clone and build all dependencies into build/deps/ (requires internet)" OFF)
 
-find_package(approxmc CONFIG)
-if (approxmc_FOUND)
-message(STATUS "Found approxmc")
-message(STATUS "ApproxMC dynamic lib: ${APPROXMC_LIBRARIES}")
-message(STATUS "ApproxMC static lib:  ${APPROXMC_STATIC_LIBRARIES}")
-message(STATUS "ApproxMC static lib deps: ${APPROXMC_STATIC_LIBRARIES_DEPS}")
-message(STATUS "ApproxMC include dirs: ${APPROXMC_INCLUDE_DIRS}")
-else()
-message(FATAL_ERROR "Cannot find ApproxMC. Please install it! Exiting.")
+set(DEPS_INSTALL_DIR "${CMAKE_BINARY_DIR}/deps_install" CACHE PATH
+    "Installation prefix for bundled dependencies")
+
+include(ProcessorCount)
+ProcessorCount(_nproc)
+if(_nproc EQUAL 0)
+    set(_nproc 4)
 endif()
 
-find_package(unigen CONFIG)
-if (unigen_FOUND)
-message(STATUS "UniGen dynamic lib: ${UNIGEN_LIBRARIES}")
-message(STATUS "UniGen static lib:  ${UNIGEN_STATIC_LIBRARIES}")
-message(STATUS "UniGen static lib deps: ${UNIGEN_STATIC_LIBRARIES_DEPS}")
-message(STATUS "UniGen include dirs: ${UNIGEN_INCLUDE_DIRS}")
-include_directories(SYSTEM ${UNIGEN_INCLUDE_DIRS})
-else()
-message(STATUS "UniGen NOT found")
+# _build_dep(name src_dir [extra cmake args...])
+# Configures, builds, and installs a dependency into DEPS_INSTALL_DIR.
+# A stamp file prevents re-running unless deps_install is wiped.
+function(_build_dep _name _src_dir)
+    set(_build_dir "${CMAKE_BINARY_DIR}/deps_build/${_name}")
+    set(_stamp     "${DEPS_INSTALL_DIR}/.stamp_${_name}")
+
+    if(EXISTS "${_stamp}")
+        message(STATUS "[deps] ${_name}: already built (delete ${_stamp} to rebuild)")
+        return()
+    endif()
+
+    message(STATUS "[deps] Configuring ${_name} from ${_src_dir} ...")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND}
+            -S "${_src_dir}"
+            -B "${_build_dir}"
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DCMAKE_INSTALL_PREFIX=${DEPS_INSTALL_DIR}
+            -DCMAKE_PREFIX_PATH=${DEPS_INSTALL_DIR}
+            # Make the linker find previously-installed dep shared libs.
+            # (The Config.cmake.in files in these projects do not call
+            # find_dependency(), so transitive IMPORTED targets may not be
+            # available.  Providing -L lets the linker resolve them.)
+            "-DCMAKE_SHARED_LINKER_FLAGS=-L${DEPS_INSTALL_DIR}/lib"
+            "-DCMAKE_EXE_LINKER_FLAGS=-L${DEPS_INSTALL_DIR}/lib"
+            -DCMAKE_INSTALL_RPATH=${DEPS_INSTALL_DIR}/lib
+            -DCMAKE_BUILD_RPATH=${DEPS_INSTALL_DIR}/lib
+            -DENABLE_TESTING=OFF
+            -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
+            # Suppress man-page generation: FALSE skips find_program re-search
+            # and cmake's if() treats "FALSE" as false (unlike "-NOTFOUND" values
+            # which trigger a re-search in some cmake versions).
+            -DHELP2MAN_FOUND:STRING=FALSE
+            ${ARGN}
+        RESULT_VARIABLE _ret
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE  _err
+    )
+    if(_ret)
+        message(FATAL_ERROR
+            "[deps] cmake configure of '${_name}' failed (exit ${_ret}).\n"
+            "stdout:\n${_out}\nstderr:\n${_err}")
+    endif()
+
+    message(STATUS "[deps] Building and installing ${_name} ...")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND}
+            --build "${_build_dir}"
+            --target install
+            --parallel ${_nproc}
+        RESULT_VARIABLE _ret
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE  _err
+    )
+    if(_ret)
+        message(FATAL_ERROR
+            "[deps] cmake build of '${_name}' failed (exit ${_ret}).\n"
+            "stdout:\n${_out}\nstderr:\n${_err}")
+    endif()
+
+    file(TOUCH "${_stamp}")
+    message(STATUS "[deps] ${_name}: done")
+endfunction()
+
+# _clone_dep(name url tag dest_dir)
+# Shallow-clones a git repository if the destination does not already exist.
+function(_clone_dep _name _url _tag _dest)
+    if(NOT EXISTS "${_dest}/.git")
+        message(STATUS "[deps] Cloning ${_name} from ${_url} (${_tag}) ...")
+        find_package(Git QUIET REQUIRED)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} clone --depth 1 --branch "${_tag}" "${_url}" "${_dest}"
+            RESULT_VARIABLE _ret
+            OUTPUT_VARIABLE _out
+            ERROR_VARIABLE  _err
+        )
+        if(_ret)
+            message(FATAL_ERROR
+                "[deps] git clone of '${_name}' failed (exit ${_ret}).\n${_err}")
+        endif()
+    else()
+        message(STATUS "[deps] ${_name}: source already present at ${_dest}")
+    endif()
+endfunction()
+
+if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeLists.txt")
+
+    if(AUTO_DOWNLOAD)
+        set(_DEPS_SRC "${CMAKE_BINARY_DIR}/deps")
+        message(STATUS "AUTO_DOWNLOAD: deps source → ${_DEPS_SRC}, install → ${DEPS_INSTALL_DIR}")
+        _clone_dep(louvain-community
+            "https://github.com/meelgroup/louvain-community.git" "master"
+            "${_DEPS_SRC}/louvain-community")
+        _clone_dep(cryptominisat
+            "https://github.com/msoos/cryptominisat.git" "master"
+            "${_DEPS_SRC}/cryptominisat")
+        _clone_dep(arjun
+            "https://github.com/meelgroup/arjun.git" "master"
+            "${_DEPS_SRC}/arjun")
+        _clone_dep(approxmc
+            "https://github.com/meelgroup/approxmc.git" "master"
+            "${_DEPS_SRC}/approxmc")
+        _clone_dep(unigen
+            "https://github.com/meelgroup/unigen.git" "master"
+            "${_DEPS_SRC}/unigen")
+    else()
+        set(_DEPS_SRC "${CMAKE_SOURCE_DIR}/deps")
+        message(STATUS "Using local deps/ submodules from ${_DEPS_SRC}/")
+    endif()
+
+    # Build in strict dependency order; each dep can find previously installed ones
+    # via CMAKE_PREFIX_PATH=${DEPS_INSTALL_DIR}.
+    _build_dep(louvain-community "${_DEPS_SRC}/louvain-community")
+    _build_dep(cryptominisat     "${_DEPS_SRC}/cryptominisat")
+    _build_dep(arjun             "${_DEPS_SRC}/arjun")
+    _build_dep(approxmc         "${_DEPS_SRC}/approxmc")
+    if(NOT NOUNIGEN)
+        _build_dep(unigen        "${_DEPS_SRC}/unigen")
+    endif()
+
+    # Point find_package to the freshly installed deps
+    list(PREPEND CMAKE_PREFIX_PATH "${DEPS_INSTALL_DIR}")
+
 endif()
 
-#find_package(ganak CONFIG)
-#if (ganak_FOUND)
-#message(STATUS "Found ganak")
-#message(STATUS "Ganak dynamic lib: ${GANAK_LIBRARIES}")
-#message(STATUS "Ganak static lib:  ${GANAK_STATIC_LIBRARIES}")
-#message(STATUS "Ganak static lib deps: ${GANAK_STATIC_LIBRARIES_DEPS}")
-#message(STATUS "Ganak include dirs: ${GANAK_INCLUDE_DIRS}")
-#else()
-#message(FATAL_ERROR "Cannot find Ganak Please install it! Exiting.")
-#endif()
+# Now find the packages (from DEPS_INSTALL_DIR or system, whichever comes first)
+find_package(louvain_communities CONFIG)
+find_package(cryptominisat5      CONFIG REQUIRED)
+find_package(arjun               CONFIG REQUIRED)
+find_package(approxmc            CONFIG REQUIRED)
+if(NOT NOUNIGEN)
+    find_package(unigen CONFIG)
+endif()
+
+if(NOT cryptominisat5_FOUND)
+    message(FATAL_ERROR
+        "CryptoMiniSat5 not found and deps/ submodules are not initialised.\n"
+        "Fix with one of:\n"
+        "  git submodule update --init && cmake ..\n"
+        "  ./configure.sh -D   (auto-downloads everything)\n")
+endif()
+if(NOT approxmc_FOUND)
+    message(FATAL_ERROR
+        "ApproxMC not found.\n"
+        "Fix with: git submodule update --init && cmake ..\n"
+        "  or:     ./configure.sh -D\n")
+endif()
+
+message(STATUS "CryptoMiniSat5 libs:     ${CRYPTOMINISAT5_LIBRARIES}")
+message(STATUS "CryptoMiniSat5 includes: ${CRYPTOMINISAT5_INCLUDE_DIRS}")
+message(STATUS "Arjun libs:              ${ARJUN_LIBRARIES}")
+message(STATUS "ApproxMC libs:           ${APPROXMC_LIBRARIES}")
+if(unigen_FOUND)
+    message(STATUS "UniGen libs:             ${UNIGEN_LIBRARIES}")
+    message(STATUS "UniGen includes:         ${UNIGEN_INCLUDE_DIRS}")
+    include_directories(SYSTEM ${UNIGEN_INCLUDE_DIRS})
+endif()
 
 # add compile defines
 set(COMPILE_DEFINES)

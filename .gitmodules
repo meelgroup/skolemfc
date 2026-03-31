@@ -9,11 +9,12 @@
 	url = https://github.com/meelgroup/arjun.git
 [submodule "deps/approxmc"]
 	path = deps/approxmc
-	url = https://github.com/arijitsh/approxmc.git
-	branch = devel
+	url = https://github.com/meelgroup/approxmc.git
+	branch = release/4.2.0
 [submodule "deps/unigen"]
 	path = deps/unigen
-	url = https://github.com/arijitsh/unigen.git
+	url = https://github.com/meelgroup/unigen.git
+	branch = master
 [submodule "utils/baseline/deps/GPMC"]
 	path = utils/baseline/deps/GPMC
 	url = https://git.trs.css.i.nagoya-u.ac.jp/k-hasimt/GPMC.git
