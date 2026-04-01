@@ -1,8 +1,7 @@
 # SkolemFC: An Approximate Skolem Function Counter
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-<!-- ![build](https://github.com/meelgroup/SkolemFC/workflows/build/badge.svg)
-[![Docker Hub](https://img.shields.io/badge/docker-latest-blue.svg)](https://hub.docker.com/r/msoos/SkolemFC/) -->
+[![.github/workflows/build.yml](https://github.com/meelgroup/skolemfc/actions/workflows/build.yml/badge.svg)](https://github.com/meelgroup/skolemfc/actions/workflows/build.yml)
 
 SkolemFC takes in a F(X,Y) formula as input and returns the number of Boolean functions G(X) such that ∃Y F(X, Y) = F(X, G(X)). SkolemFC *counts the number of functions without even generating a single function.*
 
