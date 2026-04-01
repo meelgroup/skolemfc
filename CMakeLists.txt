@@ -584,7 +584,18 @@ if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeList
     # cadical: configure creates build/ subdir; build only static lib with -fPIC
     _build_autoconf_dep(cadical  "${_DEPS_SRC}/cadical"  "build" "libcadical.a"
         "CXXFLAGS=-fPIC")
-    # cadiback: configure+make in source dir; pass absolute path to cadical
+    # cadiback: configure+make in source dir; pass absolute path to cadical.
+    # The `generate` script checks `[ -d .git ]` but inside a git submodule
+    # .git is a FILE not a directory.  Patch it unconditionally (no-op if
+    # already patched) so both submodule and fresh-clone setups work.
+    if(EXISTS "${_DEPS_SRC}/cadiback/generate")
+        file(READ "${_DEPS_SRC}/cadiback/generate" _gen)
+        string(REPLACE
+            "[ -d .git ] || die"
+            "[ -d .git ] || [ -f .git ] || die"
+            _gen "${_gen}")
+        file(WRITE "${_DEPS_SRC}/cadiback/generate" "${_gen}")
+    endif()
     _build_autoconf_dep(cadiback "${_DEPS_SRC}/cadiback" ""      "libcadiback.a"
         "CADICAL=${_DEPS_SRC}/cadical" "CXXFLAGS=-fPIC")
     _build_dep(louvain-community "${_DEPS_SRC}/louvain-community"

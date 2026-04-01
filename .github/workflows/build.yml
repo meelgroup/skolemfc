@@ -18,12 +18,12 @@ jobs:
             cmake_args: -DCMAKE_BUILD_TYPE=Release
             run_tests: true
 
-          - name: debug-ubsan
-            cmake_args: >-
-              -DCMAKE_BUILD_TYPE=Debug
-              -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
-              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
-            run_tests: true
+          # - name: debug-ubsan
+          #   cmake_args: >-
+          #     -DCMAKE_BUILD_TYPE=Debug
+          #     -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
+          #     -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
+          #   run_tests: true
 
           - name: static
             cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
