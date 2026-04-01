@@ -8,7 +8,26 @@ on:
 
 jobs:
   build:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+            run_tests: true
+
+          - name: debug-ubsan
+            cmake_args: >-
+              -DCMAKE_BUILD_TYPE=Debug
+              -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
+              -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
+            run_tests: true
+
+          - name: static
+            cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
+            run_tests: false
 
     steps:
       - name: Checkout
@@ -21,22 +40,23 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake \
-            libgmp-dev libboost-program-options-dev \
-            zlib1g-dev
+            libgmp-dev libboost-all-dev \
+            zlib1g-dev \
+            libubsan1 libasan8
 
       - name: Cache built deps
         uses: actions/cache@v4
         with:
           path: build/deps_install
-          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
+          key: deps-${{ matrix.name }}-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
           restore-keys: |
-            deps-${{ runner.os }}-
+            deps-${{ matrix.name }}-${{ runner.os }}-
 
       - name: Configure
         run: |
           cmake -S . -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DAUTO_DOWNLOAD=ON
+            -DAUTO_DOWNLOAD=OFF \
+            ${{ matrix.cmake_args }}
 
       - name: Build
         run: cmake --build build --parallel $(nproc)
@@ -45,6 +65,7 @@ jobs:
         run: build/skolemfc --version
 
       - name: Test — find_inv_bvsle_bvnot_4bit
+        if: matrix.run_tests
         run: |
           build/skolemfc -s 1 -e 0.8 -d 0.8 \
             utils/baseline/find_inv_bvsle_bvnot_4bit.qdimacs 2>&1 | tee /tmp/out.txt
