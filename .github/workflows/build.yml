@@ -1,0 +1,51 @@
+name: Build and Test
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake \
+            libgmp-dev libboost-program-options-dev \
+            zlib1g-dev
+
+      - name: Cache built deps
+        uses: actions/cache@v4
+        with:
+          path: build/deps_install
+          key: deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
+          restore-keys: |
+            deps-${{ runner.os }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DAUTO_DOWNLOAD=ON
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Version check
+        run: build/skolemfc --version
+
+      - name: Test — find_inv_bvsle_bvnot_4bit
+        run: |
+          build/skolemfc -s 1 -e 0.8 -d 0.8 \
+            utils/baseline/find_inv_bvsle_bvnot_4bit.qdimacs 2>&1 | tee /tmp/out.txt
+          grep -q "^s fc 2 \*\*" /tmp/out.txt

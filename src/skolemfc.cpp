@@ -919,7 +919,9 @@ void SkolemFC::SklFC::get_and_add_count_for_a_sample()
   double logcount_this_it = (double)(c.hashCount) + log2(c.cellSolCount);
 
   iteration++;
-  log_skolemcount += logcount_this_it;
+  if (std::isfinite(logcount_this_it)) {
+    log_skolemcount += logcount_this_it;
+  }
 
   if (show_count())
   {
