@@ -39,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libmlpack-dev \
+            build-essential cmake libmlpack-dev libensmallen-dev \
             libgmp-dev libboost-all-dev libmpfr-dev \
             zlib1g-dev \
             libubsan1 libasan8
