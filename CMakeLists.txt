@@ -433,6 +433,65 @@ function(_build_dep _name _src_dir)
     message(STATUS "[deps] ${_name}: done")
 endfunction()
 
+# _build_autoconf_dep(name src_dir make_subdir make_target [ENV_KEY=VAL...])
+# Builds an autoconf/make project in-place in its source directory.
+# cadical and cadiback use this; cryptominisat locates them by relative path.
+# make_subdir: subdirectory to run make in, relative to src_dir (e.g. "build"
+#              for cadical which places its makefile in a build/ subdir); use ""
+#              to run make directly in src_dir.
+# make_target: the specific make target (e.g. "libcadical.a"); use "" for default.
+function(_build_autoconf_dep _name _src_dir _make_subdir _make_target)
+    set(_stamp "${DEPS_INSTALL_DIR}/.stamp_${_name}")
+    if(EXISTS "${_stamp}")
+        message(STATUS "[deps] ${_name}: already built (delete ${_stamp} to rebuild)")
+        return()
+    endif()
+    file(MAKE_DIRECTORY "${DEPS_INSTALL_DIR}")
+
+    message(STATUS "[deps] Configuring ${_name} in ${_src_dir} ...")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E env ${ARGN} ./configure
+        WORKING_DIRECTORY "${_src_dir}"
+        RESULT_VARIABLE _ret
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE  _err
+    )
+    if(_ret)
+        message(FATAL_ERROR
+            "[deps] configure of '${_name}' failed (exit ${_ret}).\n"
+            "stdout:\n${_out}\nstderr:\n${_err}")
+    endif()
+
+    if(_make_subdir STREQUAL "")
+        set(_make_dir "${_src_dir}")
+    else()
+        set(_make_dir "${_src_dir}/${_make_subdir}")
+    endif()
+
+    if(_make_target STREQUAL "")
+        set(_make_cmd make -j${_nproc})
+    else()
+        set(_make_cmd make -j${_nproc} ${_make_target})
+    endif()
+
+    message(STATUS "[deps] Building ${_name} (${_make_target}) ...")
+    execute_process(
+        COMMAND ${_make_cmd}
+        WORKING_DIRECTORY "${_make_dir}"
+        RESULT_VARIABLE _ret
+        OUTPUT_VARIABLE _out
+        ERROR_VARIABLE  _err
+    )
+    if(_ret)
+        message(FATAL_ERROR
+            "[deps] make of '${_name}' failed (exit ${_ret}).\n"
+            "stdout:\n${_out}\nstderr:\n${_err}")
+    endif()
+
+    file(TOUCH "${_stamp}")
+    message(STATUS "[deps] ${_name}: done")
+endfunction()
+
 # _clone_dep(name url tag dest_dir)
 # Shallow-clones a git repository if the destination does not already exist.
 function(_clone_dep _name _url _tag _dest)
@@ -459,17 +518,26 @@ if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeList
     if(AUTO_DOWNLOAD)
         set(_DEPS_SRC "${CMAKE_BINARY_DIR}/deps")
         message(STATUS "AUTO_DOWNLOAD: deps source → ${_DEPS_SRC}, install → ${DEPS_INSTALL_DIR}")
+        _clone_dep(cadical
+            "https://github.com/meelgroup/cadical.git" "master"
+            "${_DEPS_SRC}/cadical")
+        _clone_dep(cadiback
+            "https://github.com/meelgroup/cadiback.git" "master"
+            "${_DEPS_SRC}/cadiback")
         _clone_dep(louvain-community
             "https://github.com/meelgroup/louvain-community.git" "master"
             "${_DEPS_SRC}/louvain-community")
         _clone_dep(cryptominisat
-            "https://github.com/msoos/cryptominisat.git" "master"
+            "https://github.com/msoos/cryptominisat.git" "5.12.1"
             "${_DEPS_SRC}/cryptominisat")
+        _clone_dep(sbva
+            "https://github.com/meelgroup/SBVA.git" "master"
+            "${_DEPS_SRC}/sbva")
         _clone_dep(arjun
             "https://github.com/meelgroup/arjun.git" "master"
             "${_DEPS_SRC}/arjun")
         _clone_dep(approxmc
-            "https://github.com/meelgroup/approxmc.git" "master"
+            "https://github.com/meelgroup/approxmc.git" "release/4.2.0"
             "${_DEPS_SRC}/approxmc")
         _clone_dep(unigen
             "https://github.com/meelgroup/unigen.git" "master"
@@ -481,8 +549,30 @@ if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeList
 
     # Build in strict dependency order; each dep can find previously installed ones
     # via CMAKE_PREFIX_PATH=${DEPS_INSTALL_DIR}.
+    # cadical and cadiback are autoconf/make projects built in-place; cryptominisat
+    # locates them via relative path (../cadical, ../cadiback).
+    # cadical: configure creates build/ subdir; build only static lib with -fPIC
+    _build_autoconf_dep(cadical  "${_DEPS_SRC}/cadical"  "build" "libcadical.a"
+        "CXXFLAGS=-fPIC")
+    # cadiback: configure+make in source dir; pass absolute path to cadical
+    _build_autoconf_dep(cadiback "${_DEPS_SRC}/cadiback" ""      "libcadiback.a"
+        "CADICAL=${_DEPS_SRC}/cadical" "CXXFLAGS=-fPIC")
     _build_dep(louvain-community "${_DEPS_SRC}/louvain-community")
-    _build_dep(cryptominisat     "${_DEPS_SRC}/cryptominisat")
+    # cryptominisat's backbone.cpp uses #include "../cadiback/cadiback.h" relative
+    # to its src/ dir, so it expects cadiback.h at <cryptominisat_src>/cadiback/.
+    # Create a symlink there pointing to the real header in deps/cadiback/include/.
+    file(MAKE_DIRECTORY "${_DEPS_SRC}/cryptominisat/cadiback")
+    if(NOT EXISTS "${_DEPS_SRC}/cryptominisat/cadiback/cadiback.h")
+        file(CREATE_LINK
+            "${_DEPS_SRC}/cadiback/include/cadiback.h"
+            "${_DEPS_SRC}/cryptominisat/cadiback/cadiback.h"
+            SYMBOLIC)
+    endif()
+    _build_dep(cryptominisat     "${_DEPS_SRC}/cryptominisat"
+        # Override find_library to use our local static libs, not system installs
+        "-Dcadiback=${_DEPS_SRC}/cadiback/libcadiback.a"
+        "-Dcadical=${_DEPS_SRC}/cadical/build/libcadical.a")
+    _build_dep(sbva              "${_DEPS_SRC}/sbva")
     _build_dep(arjun             "${_DEPS_SRC}/arjun")
     _build_dep(approxmc         "${_DEPS_SRC}/approxmc")
     if(NOT NOUNIGEN)
@@ -491,6 +581,8 @@ if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeList
 
     # Point find_package to the freshly installed deps
     list(PREPEND CMAKE_PREFIX_PATH "${DEPS_INSTALL_DIR}")
+    # Add to the linker search path so transitive deps (sbva, etc.) are found
+    link_directories(${DEPS_INSTALL_DIR}/lib)
 
 endif()
 

@@ -37,8 +37,8 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 
-#include "solvertypesmini.h"
-#include "streambuffer.h"
+#include <cryptominisat5/solvertypesmini.h>
+#include <cryptominisat5/streambuffer.h>
 
 using std::cout;
 using std::endl;

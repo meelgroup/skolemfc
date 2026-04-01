@@ -150,7 +150,6 @@ struct SklFC
   uint verb = 0;
   uint verb_oracle = 0;
   uint approxmc_threshold = 35;
-  ApproxMC::AppMC appmc_g;
   void unigen_callback(const std::vector<int>& solution, void*);
   vector<vector<int>> samples_from_unisamp;
   uint32_t sample_clearance_iteration = 0;

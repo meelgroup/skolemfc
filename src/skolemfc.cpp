@@ -630,17 +630,13 @@ void SkolemFC::SklFC::get_samples(uint64_t samples_needed, int _seed)
 
   int oracle_verb = std::max(0, (int)verb - 2);
 
-  ApproxMC::AppMC* ug_appmc = new ApproxMC::AppMC;
+  std::unique_ptr<CMSat::FieldGen> ug_fg = std::make_unique<ArjunNS::FGenMpq>();
+  ApproxMC::AppMC* ug_appmc = new ApproxMC::AppMC(ug_fg);
   UniGen::UniG* unigen = new UniGen::UniG(ug_appmc);
-  ArjunNS::Arjun* arjun = new ArjunNS::Arjun;
-
-  vector<uint32_t> empty_occ_sampl_vars;
-  vector<uint32_t> sampling_vars_orig;
 
   ug_appmc->set_verbosity(oracle_verb);
   ug_appmc->set_seed(iteration * _seed);
 
-  ug_appmc->set_detach_xors(1);
   ug_appmc->set_reuse_models(1);
   ug_appmc->set_sparse(0);
   ug_appmc->set_simplify(1);
@@ -650,56 +646,25 @@ void SkolemFC::SklFC::get_samples(uint64_t samples_needed, int _seed)
 
   if (use_unisamp)
   {
-    // TODO fix unisamp and update
-    // unigen->set_unisamp(1);
-    // unigen->set_unisamp_epsilon(epsilon_s);
     ug_appmc->set_epsilon(0.414);
     ug_appmc->set_delta(0.1);
   }
 
-  arjun->set_seed(_seed);
-  arjun->set_verbosity(0);
-  arjun->new_vars(skolemfc->p->nGVars());
+  // Build the formula in a SimplifiedCNF, minimize the independent set via
+  // Arjun, then hand the result off to appmc/unigen.
+  ArjunNS::SimplifiedCNF ug_cnf(ug_fg);
+  ug_cnf.new_vars(skolemfc->p->nGVars());
+  for (auto clause : skolemfc->p->g_formula_clauses) ug_cnf.add_clause(clause);
+  ug_cnf.set_sampl_vars(skolemfc->p->forall_vars);
 
-  for (auto& clause : skolemfc->p->g_formula_clauses)
-  {
-    arjun->add_clause(clause);
-  }
-  arjun->set_starting_sampling_set(skolemfc->p->forall_vars);
-  sampling_vars_orig = skolemfc->p->forall_vars;
-  bool ret = true;
-  const uint32_t orig_num_vars = arjun->get_orig_num_vars();
-  ug_appmc->new_vars(orig_num_vars);
-  arjun->start_getting_small_clauses(std::numeric_limits<uint32_t>::max(),
-                                     std::numeric_limits<uint32_t>::max(),
-                                     false);
-  vector<Lit> clause;
-  while (ret)
-  {
-    ret = arjun->get_next_small_clause(clause);
-    if (!ret)
-    {
-      break;
-    }
+  ArjunNS::Arjun ug_arjun;
+  ug_arjun.set_verb(0);
+  ug_arjun.standalone_minimize_indep(ug_cnf, false);
 
-    bool ok = true;
-    for (auto l : clause)
-    {
-      if (l.var() >= orig_num_vars)
-      {
-        ok = false;
-        break;
-      }
-    }
-
-    if (ok)
-    {
-      ug_appmc->add_clause(clause);
-    }
-  }
-  arjun->end_getting_small_clauses();
-  vector<uint32_t> sampling_vars = arjun->get_indep_set();
-  delete arjun;
+  ug_appmc->new_vars(ug_cnf.nVars());
+  for (const auto& cl : ug_cnf.clauses) ug_appmc->add_clause(cl);
+  for (const auto& cl : ug_cnf.red_clauses) ug_appmc->add_red_clause(cl);
+  vector<uint32_t> sampling_vars = ug_cnf.sampl_vars;
 
   unigen->set_callback([this](const vector<int>& solution,
                               void*) { this->unigen_callback(solution, NULL); },
@@ -776,7 +741,8 @@ void SkolemFC::SklFC::get_and_add_count_onethred(vector<vector<int>> samples)
   {
     vector<vector<Lit>> sampling_formula =
         create_formula_from_sample(samples, it);
-    ApproxMC::AppMC* appmc = new ApproxMC::AppMC;
+    std::unique_ptr<CMSat::FieldGen> th_fg = std::make_unique<ArjunNS::FGenMpq>();
+    ApproxMC::AppMC* appmc = new ApproxMC::AppMC(th_fg);
     appmc->new_vars(skolemfc->p->nVars());
     for (auto& clause : sampling_formula)
     {
@@ -839,13 +805,8 @@ ApproxMC::SolCount SkolemFC::SklFC::count_using_approxmc(
 {
   int oracle_verb = std::max(0, (int)verb - 2);
 
-  ApproxMC::AppMC* appmc = new ApproxMC::AppMC;
-  ArjunNS::Arjun* arjun = new ArjunNS::Arjun;
-
-  arjun->set_seed(seed);
-  arjun->set_verbosity(oracle_verb);
-  arjun->set_simp(1);
-  arjun->new_vars(nvars);
+  std::unique_ptr<CMSat::FieldGen> ac_fg = std::make_unique<ArjunNS::FGenMpq>();
+  ApproxMC::AppMC* appmc = new ApproxMC::AppMC(ac_fg);
 
   if (verb > 1)
   {
@@ -854,44 +815,38 @@ ApproxMC::SolCount SkolemFC::SklFC::count_using_approxmc(
          << " delta " << std::setprecision(15) << _delta << endl;
   }
 
-  for (auto& clause : clauses) arjun->add_clause(clause);
-
-  vector<uint32_t> sampling_vars;
-  vector<uint32_t> empty_occ_sampl_vars;
-
+  ArjunNS::SimplifiedCNF ac_cnf(ac_fg);
+  ac_cnf.new_vars(nvars);
+  for (auto& clause : clauses) ac_cnf.add_clause(clause);
   if (proj_vars.empty())
-    arjun->start_with_clean_sampling_set();
+    ac_cnf.start_with_clean_sampl_vars();
   else
-    arjun->set_starting_sampling_set(proj_vars);
+    ac_cnf.set_sampl_vars(proj_vars);
 
-  empty_occ_sampl_vars = arjun->get_empty_occ_sampl_vars();
-  sampling_vars = arjun->get_indep_set();
-  const auto ret =
-      arjun->get_fully_simplified_renumbered_cnf(sampling_vars, false, true);
+  ArjunNS::Arjun ac_arjun;
+  ac_arjun.set_verb(oracle_verb);
+  ac_arjun.set_simp(1);
+  ac_arjun.standalone_minimize_indep(ac_cnf, false);
 
   if (skolemfc->p->verbosity >= 2)
   {
-    cout << "c [sklfc->arjun] Arjun returned formula with " << ret.nvars
-         << " variables " << ret.cnf.size() << " clauses and "
-         << ret.sampling_vars.size() << " sized ind set" << endl;
+    cout << "c [sklfc->arjun] Arjun returned formula with " << ac_cnf.nVars()
+         << " variables " << ac_cnf.clauses.size() << " clauses and "
+         << ac_cnf.sampl_vars.size() << " sized ind set" << endl;
   }
 
-  appmc->new_vars(ret.nvars);
-  for (const auto& cl : ret.cnf) appmc->add_clause(cl);
-  sampling_vars = ret.sampling_vars;
-  uint32_t offset_count_by_2_pow = ret.empty_occs;
+  vector<uint32_t> sampling_vars = ac_cnf.sampl_vars;
+  appmc->new_vars(ac_cnf.nVars());
+  for (const auto& cl : ac_cnf.clauses) appmc->add_clause(cl);
+  for (const auto& cl : ac_cnf.red_clauses) appmc->add_red_clause(cl);
   appmc->set_sampl_vars(sampling_vars);
   appmc->set_epsilon(_epsilon);
   appmc->set_delta(_delta);
-  // TODO update approxmc
-  // if (_epsilon > 1) appmc->set_pivot_by_sqrt2(1);
-
   appmc->set_verbosity(oracle_verb);
 
   ApproxMC::SolCount c;
   if (!sampling_vars.empty())
   {
-    appmc->set_sampl_vars(sampling_vars);
     c = appmc->count();
   }
   else
@@ -899,9 +854,7 @@ ApproxMC::SolCount SkolemFC::SklFC::count_using_approxmc(
     c.hashCount = 0;
     c.cellSolCount = 1;
   }
-  c.hashCount += offset_count_by_2_pow;
 
-  delete arjun;
   delete appmc;
 
   if (skolemfc->p->verbosity >= 2)
