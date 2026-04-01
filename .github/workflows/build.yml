@@ -9,25 +9,38 @@ on:
 jobs:
   build:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: release
+          - name: release (linux)
+            os: ubuntu-24.04
             cmake_args: -DCMAKE_BUILD_TYPE=Release
             run_tests: true
 
-          # - name: debug-ubsan
+          # - name: debug-ubsan (linux)
+          #   os: ubuntu-24.04
           #   cmake_args: >-
           #     -DCMAKE_BUILD_TYPE=Debug
           #     -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
           #     -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
           #   run_tests: true
 
-          - name: static
+          - name: static (linux)
+            os: ubuntu-24.04
             cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
-            run_tests: false
+            run_tests: true
+
+          - name: static (macos)
+            os: macos-latest
+            cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
+            run_tests: true
+
+          - name: release (macos)
+            os: macos-latest
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+            run_tests: true
 
     steps:
       - name: Checkout
@@ -35,7 +48,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
@@ -44,11 +58,17 @@ jobs:
             zlib1g-dev \
             libubsan1 libasan8
 
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake mlpack gmp boost mpfr
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> $GITHUB_ENV
+
       - name: Cache built deps
         uses: actions/cache@v4
         with:
           path: build/deps_install
-          key: deps-${{ matrix.name }}-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
+          key: deps-${{ matrix.name }}-${{ hashFiles('deps/**/*.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
           restore-keys: |
             deps-${{ matrix.name }}-${{ runner.os }}-
 
@@ -59,7 +79,7 @@ jobs:
             ${{ matrix.cmake_args }}
 
       - name: Build
-        run: cmake --build build --parallel $(nproc)
+        run: cmake --build build --parallel $(nproc 2>/dev/null || sysctl -n hw.logicalcpu)
 
       - name: Version check
         run: build/skolemfc --version

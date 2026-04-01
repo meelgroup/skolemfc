@@ -10,21 +10,35 @@ To learn more about SkolemFC, please have a look at our [AAAI-24 paper](https://
 
 
 ## How to Build a Binary
-To build on Linux, you will need the following:
+
+### Dependencies
+
+**Linux:**
 ```
-sudo apt install build-essential cmake git zlib1g-dev libboost-program-options-dev libboost-serialization-dev libgmp3-dev
+sudo apt install build-essential cmake git libubsan1 libasan8 \
+    zlib1g-dev libmlpack-dev libensmallen-dev libmpfr-dev \
+    libboost-program-options-dev libboost-serialization-dev libgmp3-dev
 ```
 
-Now clone this repository and run `./install.sh`, this should compile SkolemFC and all its dependencies.
+**macOS:**
+```
+brew install cmake gmp boost mpfr mlpack
+```
+
+### Build
+
+Clone the repository (including submodules) and configure:
 
 ```
-git clone https://github.com/meelgroup/skolemfc/
+git clone --recurse-submodules https://github.com/meelgroup/skolemfc/
 cd skolemfc
-./install.sh
+./configure.sh
+cd build && make -j10
 ```
 
-Please follow [`INSTALL.md`](https://github.com/meelgroup/skolemfc/tree/main/INSTALL.md) if the script reports some error, or you need more instructions for compiling in other OS, etc.
+### configure.sh options
 
+Run `./configure.sh --help` for the full usage message.
 
 
 ## How to Use the Binary

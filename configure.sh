@@ -1,4 +1,30 @@
 #!/usr/bin/env bash
+# configure.sh — Configure the SkolemFC build
+#
+# Usage:
+#   ./configure.sh [OPTIONS] [-- EXTRA_CMAKE_ARGS]
+#
+# Options:
+#   -D, --auto-download   Let CMake clone all dependencies automatically
+#                         (default: use local deps/ submodules)
+#   --build-dir DIR       Build directory (default: build)
+#   --build-type TYPE     CMake build type: Debug, Release, RelWithDebInfo,
+#                         MinSizeRel (default: RelWithDebInfo)
+#   --debug               Shorthand for --build-type Debug
+#   --static              Compile a statically linked executable
+#   -h, --help            Show this help message and exit
+#
+# Examples:
+#   ./configure.sh                    # standard release build
+#   ./configure.sh --debug            # debug build
+#   ./configure.sh --static           # static release build
+#   ./configure.sh --static --debug   # static debug build
+#   ./configure.sh -D                 # auto-download all deps
+#   ./configure.sh -- -DFOO=BAR      # pass extra flags to cmake
+#
+# After running configure.sh, build with:
+#   cd build && make -j$(nproc)       # Linux
+#   cd build && make -j$(sysctl -n hw.logicalcpu)   # macOS
 
 set -e
 
@@ -27,6 +53,10 @@ while [[ $# -gt 0 ]]; do
         --build-type)
             BUILD_TYPE="$2"
             shift 2
+            ;;
+        --debug)
+            BUILD_TYPE="Debug"
+            shift
             ;;
         --static)
             STATIC=ON
