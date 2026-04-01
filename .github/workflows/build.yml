@@ -10,8 +10,6 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    # Skip macOS jobs when building a release (saves time — only Linux artifacts are released)
-    if: ${{ !(matrix.release_skip && github.event_name == 'push' && contains(github.event.head_commit.message, '[release]')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -21,7 +19,6 @@ jobs:
             cmake_args: -DCMAKE_BUILD_TYPE=Release
             run_tests: true
             static_compile: false
-            release_skip: false
 
           # - name: debug-ubsan (linux)
           #   os: ubuntu-24.04
@@ -31,34 +28,29 @@ jobs:
           #     -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
           #   run_tests: true
           #   static_compile: false
-          #   release_skip: false
 
           - name: static (linux)
             os: ubuntu-24.04
             cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
             run_tests: true
             static_compile: true
-            release_skip: false
 
           - name: static (macos)
             os: macos-latest
             cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
             run_tests: true
             static_compile: true
-            release_skip: true
 
           - name: release (macos)
             os: macos-latest
             cmake_args: -DCMAKE_BUILD_TYPE=Release
             run_tests: true
             static_compile: false
-            release_skip: true
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Submodules are pinned to known-good commits in the repo — always use them
           submodules: recursive
 
       - name: Install dependencies (Linux)
