@@ -64,6 +64,7 @@ SkolemFC reports that we have approximately `16 (=2 ** 4)` functions satisfying 
 ### Guarantees
 SkolemFC provides so-called "PAC", or Probably Approximately Correct, guarantees. In less fancy words, the system guarantees that the solution found is within a certain tolerance (called "epsilon") with a certain probability (called "delta"). The default tolerance and probability, i.e. epsilon and delta values, are set to 0.8 and 0.4, respectively. Both values are configurable.
 
+> Code in this branch does not provide theoretical guarantees. See `main` branch for code which truly follows the paper.
 
 ### Issues, questions, bugs, etc.
 Please click on "issues" at the top and [create a new issue](https://github.com/meelgroup/skolemfc/issues/new). All issues are responded to promptly.
