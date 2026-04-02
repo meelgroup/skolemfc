@@ -29,7 +29,6 @@
 #include <arjun/arjun.h>
 #include <gmpxx.h>
 #include <sys/wait.h>
-#include <threads.h>
 #include <unigen/unigen.h>
 
 #include <cmath>
