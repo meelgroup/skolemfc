@@ -81,7 +81,6 @@ jobs:
   build-macos:
     name: ${{ matrix.name }}
     runs-on: macos-latest
-    if: false
     strategy:
       fail-fast: false
       matrix:

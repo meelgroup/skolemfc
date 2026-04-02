@@ -599,6 +599,7 @@ if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeList
     _build_autoconf_dep(cadiback "${_DEPS_SRC}/cadiback" ""      "libcadiback.a"
         "CADICAL=${_DEPS_SRC}/cadical" "CXXFLAGS=-fPIC")
     _build_dep(louvain-community "${_DEPS_SRC}/louvain-community"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
         ${_gmp_override_args})
     # cryptominisat's backbone.cpp uses #include "../cadiback/cadiback.h" relative
     # to its src/ dir, so it expects cadiback.h at <cryptominisat_src>/cadiback/.
