@@ -53,7 +53,7 @@ if(POLICY CMP0104)
 endif()
 
 
-project (skolemfc)
+project (skolemfc VERSION 1.0.0)
 
 # -----------------------------------------------------------------------------
 # Make RelWithDebInfo the default build type if otherwise not set
@@ -380,6 +380,22 @@ function(_build_dep _name _src_dir)
         return()
     endif()
 
+    # RPATH is meaningless for static archives; setting it causes cmake's
+    # install step to fail with "No valid ELF RPATH entry" on .a files.
+    # When building static, also tell find_library to prefer .a over .so so
+    # that dep cmake configs don't hardcode .so paths (which break -static links).
+    if(BUILD_SHARED_LIBS)
+        set(_rpath_args
+            -DCMAKE_INSTALL_RPATH=${DEPS_INSTALL_DIR}/lib
+            -DCMAKE_BUILD_RPATH=${DEPS_INSTALL_DIR}/lib)
+        set(_find_suffix_args "")
+    else()
+        set(_rpath_args
+            -DCMAKE_SKIP_RPATH=ON
+            -DCMAKE_SKIP_INSTALL_RPATH=ON)
+        set(_find_suffix_args "-DCMAKE_FIND_LIBRARY_SUFFIXES=.a")
+    endif()
+
     message(STATUS "[deps] Configuring ${_name} from ${_src_dir} ...")
     execute_process(
         COMMAND ${CMAKE_COMMAND}
@@ -388,14 +404,11 @@ function(_build_dep _name _src_dir)
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DCMAKE_INSTALL_PREFIX=${DEPS_INSTALL_DIR}
             -DCMAKE_PREFIX_PATH=${DEPS_INSTALL_DIR}
-            # Make the linker find previously-installed dep shared libs.
-            # (The Config.cmake.in files in these projects do not call
-            # find_dependency(), so transitive IMPORTED targets may not be
-            # available.  Providing -L lets the linker resolve them.)
+            # Make the linker find previously-installed dep libs.
             "-DCMAKE_SHARED_LINKER_FLAGS=-L${DEPS_INSTALL_DIR}/lib"
             "-DCMAKE_EXE_LINKER_FLAGS=-L${DEPS_INSTALL_DIR}/lib"
-            -DCMAKE_INSTALL_RPATH=${DEPS_INSTALL_DIR}/lib
-            -DCMAKE_BUILD_RPATH=${DEPS_INSTALL_DIR}/lib
+            ${_rpath_args}
+            ${_find_suffix_args}
             -DENABLE_TESTING=OFF
             -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
             # Suppress man-page generation: FALSE skips find_program re-search
@@ -549,15 +562,45 @@ if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeList
 
     # Build in strict dependency order; each dep can find previously installed ones
     # via CMAKE_PREFIX_PATH=${DEPS_INSTALL_DIR}.
+
+    # When building static, find the static GMP paths here (CMAKE_FIND_LIBRARY_SUFFIXES
+    # is already ".a" at this point) so we can pass full paths to sub-builds.
+    # The -D override on the cmake command line gets clobbered by platform files, so
+    # this is the only reliable way.
+    if(NOT BUILD_SHARED_LIBS)
+        find_library(_static_gmp   NAMES gmp   REQUIRED)
+        find_library(_static_gmpxx NAMES gmpxx REQUIRED)
+        set(_gmp_override_args
+            "-DGMP_LIBRARY=${_static_gmp}"
+            "-DGMPXX_LIBRARY=${_static_gmpxx}"
+            "-DGMP_LIBRARIES=${_static_gmpxx};${_static_gmp}")
+        message(STATUS "[deps] static GMP: ${_static_gmp}, GMPXX: ${_static_gmpxx}")
+    else()
+        set(_gmp_override_args "")
+    endif()
+
     # cadical and cadiback are autoconf/make projects built in-place; cryptominisat
     # locates them via relative path (../cadical, ../cadiback).
     # cadical: configure creates build/ subdir; build only static lib with -fPIC
     _build_autoconf_dep(cadical  "${_DEPS_SRC}/cadical"  "build" "libcadical.a"
         "CXXFLAGS=-fPIC")
-    # cadiback: configure+make in source dir; pass absolute path to cadical
+    # cadiback: configure+make in source dir; pass absolute path to cadical.
+    # The `generate` script checks `[ -d .git ]` but inside a git submodule
+    # .git is a FILE not a directory.  Patch it unconditionally (no-op if
+    # already patched) so both submodule and fresh-clone setups work.
+    if(EXISTS "${_DEPS_SRC}/cadiback/generate")
+        file(READ "${_DEPS_SRC}/cadiback/generate" _gen)
+        string(REPLACE
+            "[ -d .git ] || die"
+            "[ -d .git ] || [ -f .git ] || die"
+            _gen "${_gen}")
+        file(WRITE "${_DEPS_SRC}/cadiback/generate" "${_gen}")
+    endif()
     _build_autoconf_dep(cadiback "${_DEPS_SRC}/cadiback" ""      "libcadiback.a"
         "CADICAL=${_DEPS_SRC}/cadical" "CXXFLAGS=-fPIC")
-    _build_dep(louvain-community "${_DEPS_SRC}/louvain-community")
+    _build_dep(louvain-community "${_DEPS_SRC}/louvain-community"
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+        ${_gmp_override_args})
     # cryptominisat's backbone.cpp uses #include "../cadiback/cadiback.h" relative
     # to its src/ dir, so it expects cadiback.h at <cryptominisat_src>/cadiback/.
     # Create a symlink there pointing to the real header in deps/cadiback/include/.
@@ -571,12 +614,20 @@ if(AUTO_DOWNLOAD OR EXISTS "${CMAKE_SOURCE_DIR}/deps/louvain-community/CMakeList
     _build_dep(cryptominisat     "${_DEPS_SRC}/cryptominisat"
         # Override find_library to use our local static libs, not system installs
         "-Dcadiback=${_DEPS_SRC}/cadiback/libcadiback.a"
-        "-Dcadical=${_DEPS_SRC}/cadical/build/libcadical.a")
-    _build_dep(sbva              "${_DEPS_SRC}/sbva")
-    _build_dep(arjun             "${_DEPS_SRC}/arjun")
-    _build_dep(approxmc         "${_DEPS_SRC}/approxmc")
+        "-Dcadical=${_DEPS_SRC}/cadical/build/libcadical.a"
+        ${_gmp_override_args})
+    _build_dep(sbva              "${_DEPS_SRC}/sbva"
+        ${_gmp_override_args})
+    _build_dep(arjun             "${_DEPS_SRC}/arjun"
+        # Override find_library: arjun searches PATHS last so system cadical
+        # wins otherwise; pre-fill the cache variable with our meelgroup build.
+        "-Dcadical=${_DEPS_SRC}/cadical/build/libcadical.a"
+        ${_gmp_override_args})
+    _build_dep(approxmc         "${_DEPS_SRC}/approxmc"
+        ${_gmp_override_args})
     if(NOT NOUNIGEN)
-        _build_dep(unigen        "${_DEPS_SRC}/unigen")
+        _build_dep(unigen        "${_DEPS_SRC}/unigen"
+            ${_gmp_override_args})
     endif()
 
     # Point find_package to the freshly installed deps

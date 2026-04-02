@@ -27,8 +27,6 @@
 #pragma once
 
 #include <gmp.h>
-#include <immintrin.h>
-#include <malloc.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>

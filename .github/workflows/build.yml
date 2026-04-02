@@ -1,0 +1,184 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release (linux)
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+            run_tests: true
+            static_compile: false
+
+          # - name: debug-ubsan (linux)
+          #   cmake_args: >-
+          #     -DCMAKE_BUILD_TYPE=Debug
+          #     -DCMAKE_CXX_FLAGS="-fsanitize=undefined,address -fno-sanitize-recover=all"
+          #     -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=undefined,address"
+          #   run_tests: true
+          #   static_compile: false
+
+          - name: static (linux)
+            cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
+            run_tests: true
+            static_compile: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libmlpack-dev libensmallen-dev \
+            libgmp-dev libboost-all-dev libmpfr-dev \
+            zlib1g-dev libubsan1 libasan8
+
+      - name: Cache built deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/deps_install
+            deps/cadical
+            deps/cadiback
+          key: deps-${{ matrix.name }}-${{ hashFiles('deps/**/*.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
+          restore-keys: deps-${{ matrix.name }}-Linux-
+
+      - name: Configure
+        run: cmake -S . -B build -DAUTO_DOWNLOAD=OFF ${{ matrix.cmake_args }}
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Version check
+        run: build/skolemfc --version
+
+      - name: Test — find_inv_bvsle_bvnot_4bit
+        if: matrix.run_tests
+        run: |
+          build/skolemfc -s 1 -e 0.8 -d 0.8 \
+            utils/baseline/find_inv_bvsle_bvnot_4bit.qdimacs 2>&1 | tee /tmp/out.txt
+          grep -q "^s fc 2 \*\*" /tmp/out.txt
+
+      - name: Upload artifact
+        if: matrix.static_compile
+        uses: actions/upload-artifact@v4
+        with:
+          name: skolemfc-linux-amd64
+          path: build/skolemfc
+
+  build-macos:
+    name: ${{ matrix.name }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: release (macos)
+            cmake_args: -DCMAKE_BUILD_TYPE=Release
+            run_tests: true
+            static_compile: false
+
+          - name: static (macos)
+            cmake_args: -DCMAKE_BUILD_TYPE=Release -DSTATICCOMPILE=ON
+            run_tests: true
+            static_compile: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          brew install cmake mlpack gmp boost mpfr
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> $GITHUB_ENV
+
+      - name: Cache built deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/deps_install
+            deps/cadical
+            deps/cadiback
+          key: deps-${{ matrix.name }}-${{ hashFiles('deps/**/*.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
+          restore-keys: deps-${{ matrix.name }}-macOS-
+
+      - name: Configure
+        run: cmake -S . -B build -DAUTO_DOWNLOAD=OFF ${{ matrix.cmake_args }}
+
+      - name: Build
+        run: cmake --build build --parallel $(sysctl -n hw.logicalcpu)
+
+      - name: Version check
+        run: build/skolemfc --version
+
+      - name: Test — find_inv_bvsle_bvnot_4bit
+        if: matrix.run_tests
+        run: |
+          build/skolemfc -s 1 -e 0.8 -d 0.8 \
+            utils/baseline/find_inv_bvsle_bvnot_4bit.qdimacs 2>&1 | tee /tmp/out.txt
+          grep -q "^s fc 2 \*\*" /tmp/out.txt
+
+      - name: Upload artifact
+        if: matrix.static_compile
+        uses: actions/upload-artifact@v4
+        with:
+          name: skolemfc-macos-arm64
+          path: build/skolemfc
+
+  release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[release]')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep -m1 'project\s*(skolemfc\s*VERSION' CMakeLists.txt \
+            | grep -oP '\d+\.\d+\.\d+')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: skolemfc-linux-amd64
+          path: artifacts/linux
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: skolemfc-macos-arm64
+          path: artifacts/macos
+
+      - name: Prepare release artifacts
+        run: |
+          set -euo pipefail
+          strip artifacts/linux/skolemfc
+          zip -j artifacts/skolemfc-linux-amd64.zip artifacts/linux/skolemfc
+          zip -j artifacts/skolemfc-macos-arm64.zip artifacts/macos/skolemfc
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: SkolemFC v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            artifacts/skolemfc-linux-amd64.zip
+            artifacts/skolemfc-macos-arm64.zip
