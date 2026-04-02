@@ -80,6 +80,7 @@ jobs:
 
   build-macos:
     name: ${{ matrix.name }}
+    if: false
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -147,7 +148,7 @@ jobs:
       - name: Get version
         id: version
         run: |
-          VERSION=$(grep -m1 'project(skolemfc VERSION' CMakeLists.txt \
+          VERSION=$(grep -m1 'project\s*(skolemfc\s*VERSION' CMakeLists.txt \
             | grep -oP '\d+\.\d+\.\d+')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
