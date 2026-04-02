@@ -48,7 +48,10 @@ jobs:
       - name: Cache built deps
         uses: actions/cache@v4
         with:
-          path: build/deps_install
+          path: |
+            build/deps_install
+            deps/cadical
+            deps/cadiback
           key: deps-${{ matrix.name }}-${{ hashFiles('deps/**/*.txt', 'deps/**/*.cmake', 'deps/**/CMakeLists.txt') }}
           restore-keys: deps-${{ matrix.name }}-Linux-
 
