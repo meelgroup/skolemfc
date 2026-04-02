@@ -78,7 +78,6 @@ jobs:
   build-macos:
     name: ${{ matrix.name }}
     runs-on: macos-latest
-    # Skip macOS on release builds — only Linux artifacts are packaged
     if: false
     strategy:
       fail-fast: false
