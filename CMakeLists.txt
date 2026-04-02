@@ -53,7 +53,7 @@ if(POLICY CMP0104)
 endif()
 
 
-project (skolemfc)
+project (skolemfc VERSION 1.0.0)
 
 # -----------------------------------------------------------------------------
 # Make RelWithDebInfo the default build type if otherwise not set
